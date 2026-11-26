@@ -1,0 +1,111 @@
+name: Fork Sync & Release
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # UTC 04:00 = 北京时间 12:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/pt-plugins/PT-depiler.git
+          git fetch upstream master
+
+      - name: Merge upstream (no force push)
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BEFORE=$(git rev-parse HEAD)
+          if git merge --no-edit upstream/master; then
+            AFTER=$(git rev-parse HEAD)
+            git push origin master
+            if [ "$BEFORE" = "$AFTER" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              echo "upstream has no new commits, skip build"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            git merge --abort || true
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "conflict=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Open conflict issue
+        if: env.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: "上游同步冲突：master",
+              body: "与 upstream/master 合并冲突，未强推、未覆盖。请手动合并后重试。"
+            })
+
+  release:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ">=23.7.0"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Chrome extension
+        run: pnpm build:dist
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(node -p "require('./dist-chrome/manifest.json').version")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Pack zip
+        uses: cardinalby/webext-buildtools-pack-extension-dir-action@v1
+        with:
+          extensionDir: dist-chrome
+          zipFilePath: build/extension-chrome.zip
+
+      - name: Sign CRX with fixed key
+        uses: cardinalby/webext-buildtools-chrome-crx-action@v2
+        with:
+          zipFilePath: build/extension-chrome.zip
+          crxFilePath: build/extension.crx
+          privateKey: ${{ secrets.CHROME_SELF_SIGN_CRX_PRIVATE_KEY }}
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          generate_release_notes: false
+          files: |
+            build/extension-chrome.zip
+            build/extension.crx
+            dist-chrome/manifest.json
