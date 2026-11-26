@@ -11,6 +11,7 @@ import { sleep } from "~/helper.ts";
 
 export enum EJobType {
   FlushUserInfo = "flushUserInfo",
+  SiteSignIn = "siteSignIn",
   ReDownloadTorrent = "reDownloadTorrent",
   AutoBackup = "autoBackup",
 }
@@ -134,6 +135,49 @@ jobs.scheduleJob({
   duration: 1000 * 60 * 10, // check every 10 minutes
   immediate: true,
   execute: autoFlushUserInfo(),
+});
+
+/**
+ * 站点自动签到：每 30 分钟检查一次，只在“指定时间点之后”且今日尚未成功签到时执行。
+ * 实际的“今日已签”去重在 offscreen 的 signInForSite 内完成，这里只做总开关与时间闸门。
+ */
+function autoSiteSignIn() {
+  return async () => {
+    const configStore = (await extStorage.getItem("config"))!;
+    const { enabled = false, afterTime = "00:00", force = false } =
+      configStore?.userInfo?.signIn ?? {};
+    if (!enabled) return;
+
+    const now = new Date();
+    const [afterHour, afterMinute] = afterTime.split(":").map((v) => parseInt(v, 10));
+    if (
+      now.getHours() < afterHour ||
+      (now.getHours() === afterHour && now.getMinutes() < (afterMinute || 0))
+    ) {
+      return;
+    }
+
+    await setupOffscreenDocument();
+    try {
+      const results = await sendMessage("signInAllSites", { force });
+      const succeeded = results.filter((r) => ["success", "already"].includes(r.outcome.status)).length;
+      sendMessage("logger", {
+        msg: `Auto site sign-in finished: ${succeeded}/${results.length} succeeded.`,
+        data: { results },
+      }).catch();
+    } catch (e) {
+      sendMessage("logger", { msg: `Auto site sign-in failed: ${(e as Error)?.message ?? e}` }).catch();
+    }
+  };
+}
+
+// noinspection JSIgnoredPromiseFromCall
+jobs.scheduleJob({
+  id: EJobType.SiteSignIn,
+  type: "interval",
+  duration: 1000 * 60 * 30, // check every 30 minutes
+  immediate: true,
+  execute: autoSiteSignIn(),
 });
 
 /**

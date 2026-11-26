@@ -293,6 +293,13 @@ export const useConfigStore = defineStore("config", {
           interval: 5, // minutes
         },
       },
+
+      signIn: {
+        enabled: false,
+        afterTime: "00:00",
+        force: false,
+      },
+
       alwaysPickLastUserInfo: true,
       showDeadSiteInOverview: false,
       showPassedSiteInOverview: false,

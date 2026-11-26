@@ -387,6 +387,8 @@
       },
       "flushCancel": "Refresh canceled",
       "flushSelectSite": "Refresh selected",
+      "signInAll": "Sign in all",
+      "signInAllDone": "Sign-in finished: {ok}/{total} succeeded",
       "joinTimeFormat": "Display join time",
       "joinTimeFormatOptions": {
         "added": "Absolute Date",
@@ -422,7 +424,9 @@
     "table": {
       "action": {
         "flushData": "Refresh Data",
-        "viewHistoryData": "View History Data"
+        "viewHistoryData": "View History Data",
+        "signIn": "Sign in",
+        "signedIn": "Signed in"
       },
       "invites": "Invites",
       "joinTime": "Join Time",
@@ -1454,8 +1458,8 @@
     "contextMenuSendToDownloaderAdvanced": "Advanced push",
     "contextMenuSendToDownloaderDefaultFolder": "Default path",
     "contextMenuSendToDownloaderIn": "Push to $1 -> $2",
-    "extDesc": "PT Depiler",
-    "extName": "PT Depiler",
+    "extDesc": "PT Depiler check-in fork (self-signed)",
+    "extName": "PT Depiler - SignIn+",
     "notificationSendLinkToDownloaderFailure": "Failed to send the link to the downloader [$1]",
     "notificationSendLinkToDownloaderSuccess": "Successfully sent the link to the downloader [$1]",
     "omniboxSearch": "Search $2 in [ $1 ]",
@@ -1584,6 +1588,10 @@
       "unrefreshedSite": "unrefreshed"
     },
     "enableAutoRefresh": "Enable background auto-refresh?",
+    "enableSiteSignIn": "Enable automatic site check-in?",
+    "signInAfterTime": "Daily check-in time",
+    "signInForce": "Ignore today's check-in record and sign in again",
+    "signInNow": "Sign in all sites now",
     "queueConcurrency": "Request Queue Concurrency",
     "showDeadSite": "Show sites marked as dead (isDead) in the overview",
     "showPassedSite": "Show sites marked as offline (isOffline) or not allowing user info query in the overview"

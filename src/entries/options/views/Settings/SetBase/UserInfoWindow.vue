@@ -7,6 +7,7 @@ import { useConfigStore } from "@/options/stores/config.ts";
 import { useMetadataStore } from "@/options/stores/metadata.ts";
 import { formatDate } from "@/options/utils.ts";
 import { useI18n } from "vue-i18n";
+import { sendMessage } from "@/messages.ts";
 
 const { t } = useI18n();
 const configStore = useConfigStore();
@@ -33,6 +34,22 @@ async function save() {
 defineExpose({
   afterSave: save,
 });
+
+const signInRunning = ref(false);
+async function signInNow() {
+  if (signInRunning.value) return;
+  signInRunning.value = true;
+  try {
+    const results = await sendMessage("signInAllSites", { force: true });
+    const succeeded = results.filter((r) => ["success", "already"].includes(r.outcome.status)).length;
+    sendMessage("logger", {
+      msg: `Manual site sign-in finished: ${succeeded}/${results.length} succeeded.`,
+      data: { results },
+    }).catch();
+  } finally {
+    signInRunning.value = false;
+  }
+}
 
 onMounted(async () => {
   // noinspection ES6MissingAwait
@@ -128,6 +145,51 @@ onMounted(async () => {
               variant="text"
               @click="getNextFlushUserInfoAt"
             ></v-btn>
+          </div>
+        </v-alert>
+      </v-row>
+
+      <!-- 站点自动签到 -->
+      <v-switch
+        v-model="configStore.userInfo.signIn.enabled"
+        :label="t('userInfo.enableSiteSignIn')"
+        color="success"
+        hide-details
+      />
+      <div class="d-flex align-center mt-1">
+        <v-btn
+          :loading="signInRunning"
+          color="primary"
+          density="compact"
+          prepend-icon="mdi-check-decagram"
+          size="small"
+          variant="tonal"
+          @click="signInNow"
+        >{{ t("userInfo.signInNow") }}</v-btn>
+      </div>
+      <v-row v-if="configStore.userInfo.signIn.enabled" class="mt-1 ml-2 mb-2">
+        <v-alert type="info" variant="outlined">
+          <div class="d-inline-flex align-center text-no-wrap mb-1">
+            • {{ t("userInfo.signInAfterTime") }}
+            <v-text-field
+              :model-value="configStore.userInfo.signIn.afterTime"
+              class="mx-2"
+              density="compact"
+              hide-details
+              readonly
+            >
+              <v-menu :close-on-content-click="false" activator="parent" min-width="0">
+                <v-time-picker v-model="configStore.userInfo.signIn.afterTime" format="24hr"></v-time-picker>
+              </v-menu>
+            </v-text-field>
+          </div>
+          <div class="d-inline-flex align-center text-no-wrap">
+            <v-switch
+              v-model="configStore.userInfo.signIn.force"
+              :label="t('userInfo.signInForce')"
+              color="success"
+              hide-details
+            />
           </div>
         </v-alert>
       </v-row>

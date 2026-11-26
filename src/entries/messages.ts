@@ -8,6 +8,7 @@ import type {
   TSiteID,
   getFaviconMetadata,
 } from "@ptd/site";
+import type { ISignInOutcome } from "@ptd/site/utils/signin.ts";
 import type {
   ISocialInformation,
   ISocialRecommendationItem,
@@ -225,7 +226,11 @@ interface ProtocolMap extends TMessageMap {
   getSiteList(): Array<{ id: string; name: string; url: string; offline: boolean }>;
   getDownloaderList(): Array<{ id: string; name: string; type: string; enabled: boolean; address: string }>;
 
-  // 2.10 Native messaging bridge control
+  // 2.10 站点签到 ( utils/signin )
+  signInSite(data: { siteId: TSiteID }): ISignInOutcome;
+  signInAllSites(data?: { force?: boolean }): Array<{ siteId: TSiteID; outcome: ISignInOutcome }>;
+
+  // 2.11 Native messaging bridge control
   nativeBridgeGetStatus(): BridgeStatus;
   nativeBridgeSetEnabled(data: boolean): BridgeStatus;
   nativeBridgeReconnect(): BridgeStatus;

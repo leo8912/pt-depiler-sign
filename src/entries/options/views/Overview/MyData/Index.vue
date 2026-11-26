@@ -26,6 +26,68 @@ import ExportUserInfoDialog from "./ExportUserInfoDialog.vue";
 
 import { formatRatio } from "./utils/format.ts";
 import { tableData, initTableData, cancelFlushSiteLastUserInfo, flushSiteLastUserInfo } from "./utils/lastUserData.ts";
+import { sendMessage } from "@/messages.ts";
+import { SIGNIN_EXCLUDED_SITES } from "@ptd/site/utils/signin.ts";
+
+/** 签到记录（由 offscreen 侧写入 metadata.signInRecords，按天 -> 站点 索引） */
+interface ISignInRecordLite {
+  at: number;
+  status: string;
+  message: string;
+  points?: number;
+}
+type TSignInRecords = Record<string, Record<string, ISignInRecordLite>>;
+
+const signInRecords = ref<TSignInRecords>({});
+const signInRunning = ref<string | null>(null);
+
+function todaySignInKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function todaySignIn(siteId: string): ISignInRecordLite | undefined {
+  const rec = signInRecords.value[todaySignInKey()]?.[siteId];
+  // 只有签到成功/已签才显示，失败或无签到机制的站点不显示
+  if (!rec || !["success", "already"].includes(rec.status)) return undefined;
+  return rec;
+}
+
+async function loadSignInRecords() {
+  const meta = ((await sendMessage("getExtStorage", "metadata")) ?? {}) as Record<string, unknown>;
+  signInRecords.value = (meta.signInRecords as TSignInRecords) ?? {};
+}
+
+async function signInOne(siteId: TSiteID) {
+  if (signInRunning.value) return;
+  signInRunning.value = siteId;
+  try {
+    const outcome = await sendMessage("signInSite", { siteId });
+    runtimeStore.showSnackbar(`${siteId}: ${outcome.message}`, {
+      color: ["success", "already"].includes(outcome.status) ? "success" : "warning",
+    });
+    await loadSignInRecords();
+  } catch (e) {
+    runtimeStore.showSnackbar(String(e), { color: "error" });
+  } finally {
+    signInRunning.value = null;
+  }
+}
+
+async function signInAll() {
+  if (signInRunning.value) return;
+  signInRunning.value = "all";
+  try {
+    const results = await sendMessage("signInAllSites", { force: false });
+    const ok = results.filter((r) => ["success", "already"].includes(r.outcome.status)).length;
+    runtimeStore.showSnackbar(t("MyData.index.signInAllDone", { ok, total: results.length }), { color: "success" });
+    await loadSignInRecords();
+  } catch (e) {
+    runtimeStore.showSnackbar(String(e), { color: "error" });
+  } finally {
+    signInRunning.value = null;
+  }
+}
 
 const { t } = useI18n();
 const router = useRouter();
@@ -144,7 +206,11 @@ const lastUpdateErrorStatuses = [
 ].map((item) => item.toString());
 
 // 挂载时加载表格数据
-onMounted(() => initTableData());
+onMounted(() => {
+  initTableData();
+  // 加载今日签到记录，供工具栏与每行按钮展示
+  loadSignInRecords();
+});
 
 // 监听用户信息变化（ offscreen 直接定时刷新的情况 ）
 watchDebounced(
@@ -239,6 +305,16 @@ const { tableRef: fitTableRef, fittedHeaders, tableClass: fitTableClass } = useT
   <v-card>
     <v-card-title>
       <v-row gap="0" class="ma-0">
+        <!-- 一键签到（放在刷新数据之前） -->
+        <NavButton
+          color="teal"
+          icon="mdi-calendar-check"
+          :loading="signInRunning === 'all'"
+          :disabled="signInRunning !== null"
+          :text="t('MyData.index.signInAll')"
+          @click="signInAll"
+        />
+
         <!-- 刷新，取消刷新 -->
         <NavButton
           v-if="runtimeStore.isUserInfoFlush"
@@ -689,25 +765,44 @@ const { tableRef: fitTableRef, fittedHeaders, tableClass: fitTableClass } = useT
 
       <!-- 操作 -->
       <template #item.action="{ item }">
-        <v-btn-group class="table-action" density="compact" variant="plain">
-          <v-btn
-            :title="t('MyData.table.action.viewHistoryData')"
-            color="blue"
-            icon="mdi-view-list"
-            size="small"
-            @click="() => viewHistoryData(item.site)"
-          >
-          </v-btn>
-          <v-btn
-            :disabled="runtimeStore.userInfo.flushPlan[item.site]"
-            :loading="runtimeStore.userInfo.flushPlan[item.site]"
-            :title="t('MyData.table.action.flushData')"
-            color="green"
-            icon="mdi-cached"
-            size="small"
-            @click="() => flushSiteLastUserInfo([item.site])"
-          ></v-btn>
-        </v-btn-group>
+        <div class="d-flex align-center justify-end flex-wrap">
+          <v-btn-group class="table-action" density="compact" variant="plain">
+            <v-btn
+              v-if="!SIGNIN_EXCLUDED_SITES.has(item.site)"
+              :loading="signInRunning === item.site"
+              :disabled="signInRunning !== null"
+              :title="
+                todaySignIn(item.site)
+                  ? t('MyData.table.action.signedIn') + ' - ' + todaySignIn(item.site)!.message
+                  : t('MyData.table.action.signIn')
+              "
+              :color="todaySignIn(item.site) ? 'teal' : 'purple'"
+              icon="mdi-calendar-check"
+              size="small"
+              @click="() => signInOne(item.site)"
+            ></v-btn>
+            <v-btn
+              :title="t('MyData.table.action.viewHistoryData')"
+              color="blue"
+              icon="mdi-view-list"
+              size="small"
+              @click="() => viewHistoryData(item.site)"
+            >
+            </v-btn>
+            <v-btn
+              :disabled="runtimeStore.userInfo.flushPlan[item.site]"
+              :loading="runtimeStore.userInfo.flushPlan[item.site]"
+              :title="t('MyData.table.action.flushData')"
+              color="green"
+              icon="mdi-cached"
+              size="small"
+              @click="() => flushSiteLastUserInfo([item.site])"
+            ></v-btn>
+          </v-btn-group>
+          <div v-if="todaySignIn(item.site)" class="text-caption text-teal ml-1">
+            {{ t('MyData.table.action.signedIn') }}<template v-if="todaySignIn(item.site)!.points != null"> · +<BonusFormatSpan :num="todaySignIn(item.site)!.points!" /></template>
+          </div>
+        </div>
       </template>
     </v-data-table>
   </v-card>

@@ -192,6 +192,14 @@ export interface IConfigPiniaStorageSchema {
         interval: number; // 每次重试的间隔（ 1-5 分钟 ）
       };
     };
+
+    // 站点自动签到
+    signIn: {
+      enabled: boolean; // 是否开启自动签到
+      afterTime: string; // '00:00'，每天的指定时间点之后才允许签到（本地时区）
+      force: boolean; // 忽略“今日已签”记录强制重签
+    };
+
     alwaysPickLastUserInfo: boolean; // 在获取用户信息时，带入最新一次的 userInfo 作为初始值
     // 是否在概览中展示已被标记为死亡 （isDead） 的站点
     showDeadSiteInOverview: boolean;
