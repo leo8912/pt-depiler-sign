@@ -1,16 +1,15 @@
 name: Fork Sync & Release
 
-# 同步策略：只有上游（pt-plugins/PT-depiler）发布新 release 时才同步。
-# Actions 无法跨仓库监听别人的 release，因此定时轮询检查上游最新 release tag，
-# 用 git tag upstream/<tag> 记录已同步版本，只有 tag 变化才合并 + 构建 + 发布。
+# 同步策略：只有上游发布新 release 时才合并上游代码。
+# 发布策略：只要 master 有未发布的新 commit（含本地功能提交与上游同步），就构建并发布签名 CRX。
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 每 6 小时检查一次上游 release（仅比对 tag）
+    - cron: "0 */6 * * *"   # 每 6 小时检查上游 release（仅比对 tag）
   workflow_dispatch:
     inputs:
       force:
-        description: "强制同步（忽略 tag 比对）"
+        description: "强制同步（忽略上游 tag 比对）"
         type: boolean
         default: false
 
@@ -54,8 +53,6 @@ jobs:
     needs: check
     if: needs.check.outputs.should_sync == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.merge.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,22 +67,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          BEFORE=$(git rev-parse HEAD)
-          if git merge --no-edit upstream/master; then
-            AFTER=$(git rev-parse HEAD)
-            git push origin master
-            if [ "$BEFORE" = "$AFTER" ]; then
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            git merge --abort || true
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "conflict=true" >> "$GITHUB_ENV"
-          fi
+          git merge --no-edit upstream/master
+          git push origin master
       - name: Mark release as synced
-        if: success() && env.conflict != 'true'
         env:
           TAG: ${{ needs.check.outputs.tag }}
         run: |
@@ -94,7 +78,7 @@ jobs:
           git tag -f "upstream/$TAG"
           git push origin "refs/tags/upstream/$TAG" --force
       - name: Open conflict issue
-        if: env.conflict == 'true'
+        if: failure()
         uses: actions/github-script@v7
         with:
           script: |
@@ -107,39 +91,67 @@ jobs:
 
   release:
     needs: [check, sync]
-    if: needs.sync.outputs.changed == 'true'
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0
+      - name: Check for unpublished commits
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LAST=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          if [ -z "$LAST" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::no previous release, will publish"; exit 0
+          fi
+          LAST_SHA=$(git rev-list -n1 "refs/tags/$LAST" 2>/dev/null || true)
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ -n "$LAST_SHA" ] && [ "$LAST_SHA" = "$HEAD_SHA" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no new commits since last release, skip"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::new commits found, will publish"
+          fi
       - uses: pnpm/action-setup@v6
+        if: steps.gate.outputs.should_publish == 'true'
       - uses: actions/setup-node@v6
+        if: steps.gate.outputs.should_publish == 'true'
         with:
           node-version: ">=23.7.0"
           cache: pnpm
       - name: Install dependencies
+        if: steps.gate.outputs.should_publish == 'true'
         run: pnpm install
       - name: Build Chrome extension
+        if: steps.gate.outputs.should_publish == 'true'
         run: pnpm build:dist
       - name: Read version
+        if: steps.gate.outputs.should_publish == 'true'
         id: ver
         run: |
           VER=$(node -p "require('./dist-chrome/manifest.json').version")
           echo "version=$VER" >> "$GITHUB_OUTPUT"
       - name: Pack zip
+        if: steps.gate.outputs.should_publish == 'true'
         uses: cardinalby/webext-buildtools-pack-extension-dir-action@v1
         with:
           extensionDir: dist-chrome
           zipFilePath: build/extension-chrome.zip
       - name: Sign CRX with fixed key
+        if: steps.gate.outputs.should_publish == 'true'
         uses: cardinalby/webext-buildtools-chrome-crx-action@v2
         with:
           zipFilePath: build/extension-chrome.zip
           crxFilePath: build/extension.crx
           privateKey: ${{ secrets.CHROME_SELF_SIGN_CRX_PRIVATE_KEY }}
       - name: Publish release
+        if: steps.gate.outputs.should_publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
